@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "storage-loadlock-gauge-reader"
+version = "0.2.0"
+description = "TPG261 pressure bar meter for a Raspberry Pi and MAX7219 32x8 matrix"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["pyserial==3.5"]
+
+[project.optional-dependencies]
+pi = ["spidev==3.8"]
+
+[project.scripts]
+gauge-reader = "storage_loadlock_gauge_reader.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
