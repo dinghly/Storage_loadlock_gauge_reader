@@ -1,4 +1,4 @@
-# Raspberry Pi 3B hardware connections
+# Raspberry Pi 3B/4B hardware connections
 
 The program reads a TPG261 through a USB-to-RS232 adapter and drives the four
 MAX7219 controllers in the 8×32 SZH-EKAD-115 display through SPI. The controller
@@ -101,7 +101,7 @@ output. J1 is numbered 1 VCC, 2 GND, 3 DIN, 4 CS, 5 CLK. Check the printed signa
 labels on your actual assembled 8×32 board before applying power; do not infer
 connector orientation from this table alone.
 
-| Raspberry Pi 3B source | Through the buffer | Display input J1 |
+| Raspberry Pi 3B/4B source | Through the buffer | Display input J1 |
 | --- | --- | --- |
 | Physical pin 19, GPIO10 / SPI0 MOSI | A → Y, channel 1 | Pin 3, DIN |
 | Physical pin 23, GPIO11 / SPI0 SCLK | A → Y, channel 2 | Pin 5, CLK |

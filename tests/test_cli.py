@@ -5,7 +5,7 @@ from io import StringIO
 import unittest
 from unittest.mock import Mock, patch
 
-from storage_loadlock_gauge_reader.cli import demo_pressure, main, parse_args, run_meter
+from storage_loadlock_gauge_reader.cli import ConsoleDisplay, demo_pressure, main, parse_args, run_meter
 from storage_loadlock_gauge_reader.tpg261 import (
     CommunicationError, GaugeStatus, PressureUnit, Reading,
 )
@@ -212,6 +212,24 @@ class MeterTests(unittest.TestCase):
                       ["--demo", "--demo-overrange"]):
             with self.subTest(extra=extra), redirect_stderr(StringIO()), self.assertRaises(SystemExit):
                 parse_args(extra)
+
+    def test_new_defaults_and_orientation_overrides(self):
+        args = parse_args([])
+        self.assertEqual(args.brightness, 0)
+        self.assertEqual(args.direction, "right-to-left")
+        self.assertTrue(args.reverse_modules)
+        args = parse_args(["--brightness", "5", "--direction", "left-to-right", "--no-reverse-modules"])
+        self.assertEqual(args.brightness, 5)
+        self.assertEqual(args.direction, "left-to-right")
+        self.assertFalse(args.reverse_modules)
+
+    def test_console_uses_whole_columns_and_the_selected_direction(self):
+        for direction, expected in (("right-to-left", "." * 23 + "#" * 9),
+                                    ("left-to-right", "#" * 9 + "." * 23)):
+            output = StringIO()
+            with redirect_stdout(output):
+                ConsoleDisplay(direction).show_level(9 / 32 + .001)
+            self.assertEqual(output.getvalue().strip(), "|" + expected + "|")
 
 
 if __name__ == "__main__":

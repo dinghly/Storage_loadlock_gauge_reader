@@ -123,6 +123,29 @@ class Max7219Tests(unittest.TestCase):
                 self.assertEqual(wire_pixels(self.spi.frames[-8:]),
                                  {(column, y) for y in range(8)})
 
+    def test_right_anchored_bar_grows_and_shrinks_without_partial_columns(self):
+        display = self.make_display(direction="right-to-left")
+        for columns in (0, 1, 2, 8, 9, 16, 24, 32, 24, 9, 1, 0):
+            display.show_level(columns / 32)
+            self.assertEqual(wire_pixels(self.spi.frames[-8:]),
+                             {(x, y) for x in range(32 - columns, 32) for y in range(8)})
+
+    def test_video_layout_fills_near_DIN_right_edge_then_next_tile(self):
+        display = self.make_display(direction="right-to-left", reverse_modules=True)
+        for columns in (1, 3, 8, 9, 17, 25, 32):
+            display.show_level(columns / 32)
+            # In the video DIN-nearest chip is on the right. Convert physical
+            # chip bits back to visible coordinates independently of the driver.
+            visible = {(8 * (3 - chip_x // 8) + chip_x % 8, y)
+                       for chip_x, y in wire_pixels(self.spi.frames[-8:])}
+            self.assertEqual(visible, {(x, y) for x in range(32 - columns, 32) for y in range(8)})
+
+    def test_default_brightness_is_minimum_and_explicit_level_is_honored(self):
+        self.make_display()
+        self.assertIn([10, 0] * 4, self.spi.frames)
+        self.make_display(intensity=7)
+        self.assertIn([10, 7] * 4, self.spi.frames)
+
     def test_error_replaces_full_bar_with_four_crosses(self):
         display = self.make_display()
         display.show_level(1)
@@ -190,7 +213,7 @@ class Max7219Tests(unittest.TestCase):
 
     def test_invalid_parameters_and_levels(self):
         for kwargs in ({"intensity": -1}, {"intensity": 16}, {"intensity": 1.5},
-                       {"rotate": 45}, {"bus": -1}, {"device": -1}):
+                       {"rotate": 45}, {"bus": -1}, {"device": -1}, {"direction": "up"}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 Max7219Display(**kwargs)
         display = self.make_display()

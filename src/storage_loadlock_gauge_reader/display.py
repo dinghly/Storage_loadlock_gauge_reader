@@ -36,12 +36,12 @@ def vacuum_fraction(pressure_torr: float, atmospheric_torr: float = 760.0) -> fl
     return 0.0
 
 
-def lit_pixels(fraction: float) -> int:
-    """Round a clipped level to one of 257 possible pixel counts."""
+def lit_columns(fraction: float) -> int:
+    """Round a clipped level to 0..32 complete columns (no partial columns)."""
     fraction = float(fraction)
     if not math.isfinite(fraction):
         raise ValueError("level must be a finite number")
-    return int(max(0.0, min(1.0, fraction)) * 256 + 0.5)
+    return int(max(0.0, min(1.0, fraction)) * 32 + 0.5)
 
 
 def level_fraction(
@@ -98,15 +98,18 @@ class Max7219Display:
         self,
         bus: int = 0,
         device: int = 0,
-        intensity: int = 2,
+        intensity: int = 0,
         rotate: int = 0,
         reverse_modules: bool = False,
         mirror: bool = False,
+        direction: str = "left-to-right",
     ) -> None:
         if not isinstance(intensity, int) or not 0 <= intensity <= 15:
             raise ValueError("intensity must be an integer from 0 to 15")
         if rotate not in (0, 90, 180, 270):
             raise ValueError("rotate must be 0, 90, 180, or 270 degrees")
+        if direction not in ("left-to-right", "right-to-left"):
+            raise ValueError("direction must be left-to-right or right-to-left")
         if not isinstance(bus, int) or not isinstance(device, int) or min(bus, device) < 0:
             raise ValueError("SPI bus and device must be nonnegative integers")
         try:
@@ -119,6 +122,7 @@ class Max7219Display:
         self.rotate = rotate
         self.reverse_modules = reverse_modules
         self.mirror = mirror
+        self.direction = direction
         self._closed = False
         self._spi = spidev.SpiDev()
         try:
@@ -173,15 +177,16 @@ class Max7219Display:
             self._spi.xfer2(frame)
 
     def show_level(self, fraction: float) -> None:
-        """Fill columns left to right, filling a partial column bottom to top."""
+        """Grow/shrink a bar from the chosen edge, using full-height columns."""
         try:
             fraction = float(fraction)
         except (TypeError, ValueError) as exc:
             raise ValueError("level must be a finite number") from exc
         if not math.isfinite(fraction):
             raise ValueError("level must be a finite number")
-        count = lit_pixels(fraction)
-        self._show_pixels((index // 8, 7 - index % 8) for index in range(count))
+        columns = lit_columns(fraction)
+        start = self.width - columns if self.direction == "right-to-left" else 0
+        self._show_pixels((x, y) for x in range(start, start + columns) for y in range(8))
 
     def show_error(self) -> None:
         """Replace the reading with four X symbols, never a plausible level bar."""

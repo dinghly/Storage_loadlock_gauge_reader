@@ -52,17 +52,17 @@ class VacuumBandsTests(unittest.TestCase):
         with self.assertRaises(InvalidReadingError):
             _ = Reading(GaugeStatus.NO_SENSOR, .02, PressureUnit.MBAR).pressure_torr
 
-    def test_partial_column_fills_bottom_to_top_for_finer_steps(self):
+    def test_every_lit_column_is_full_height(self):
         spi = FakeSpi()
         with patch.dict('sys.modules', {'spidev': types.SimpleNamespace(SpiDev=lambda: spi)}):
             with Max7219Display() as display:
                 display.show_level(3 / 256)
-                self.assertEqual(wire_pixels(spi.frames[-8:]), {(0, 7), (0, 6), (0, 5)})
+                self.assertEqual(wire_pixels(spi.frames[-8:]), set())
+                display.show_level(5 / 256)
+                self.assertEqual(wire_pixels(spi.frames[-8:]), {(0, y) for y in range(8)})
                 display.show_level(193 / 256)
                 pixels = wire_pixels(spi.frames[-8:])
-                self.assertEqual(len(pixels), 193)
-                self.assertIn((24, 7), pixels)
-                self.assertNotIn((24, 6), pixels)
+                self.assertEqual(pixels, {(x, y) for x in range(24) for y in range(8)})
 
 
 if __name__ == '__main__':

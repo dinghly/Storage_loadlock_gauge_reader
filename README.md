@@ -1,9 +1,10 @@
-# TPG261 → Raspberry Pi 3B → MAX7219 LED pressure meter
+# TPG261 → Raspberry Pi 3B/4B → MAX7219 LED pressure meter
 
 Read a Pfeiffer TPG261 through a **USB-to-RS232 adapter** and display its pressure
 as a horizontal bar on the **[SMG] SZH-EKAD-115 MAX7219 8×32 dot matrix**.
-The four 8×8 tiles provide a 256-LED bar, filled left to right, with a partial
-column filling bottom to top for finer logarithmic steps. The LEDs keep their
+The four 8×8 tiles provide a 256-LED bar that fills **right to left** as pressure
+falls, and empties **left to right** as pressure rises. Each step switches an
+entire column of eight LEDs; there is no gradual filling within a column. The LEDs keep their
 fixed hardware color; software does not change their color.
 
 Requires Raspberry Pi OS with Python **3.9 or newer**. Both 32-bit and 64-bit Pi OS
@@ -56,7 +57,7 @@ Use a stable `/dev/serial/by-id/...` path with `--port` if available. Otherwise,
 With the matrix wired and powered:
 
 ```sh
-.venv/bin/gauge-reader --demo --brightness 2
+.venv/bin/gauge-reader --demo --brightness 0
 ```
 
 The bar sweeps from empty to full and back. **Demo data is synthetic**; this mode
@@ -68,11 +69,13 @@ PCB layouts differ. If the bar is broken into sideways strips, rotate each tile:
 .venv/bin/gauge-reader --demo --rotate 90
 ```
 
-Try `--rotate 0`, `90`, `180`, or `270` until the bar is continuous. Add
-`--reverse-modules` if tile order is reversed, or `--mirror` to flip the logical
-image horizontally. These are independent adjustments; keep the combination
-that works for your board. The default treats the DIN-nearest tile as the left
-one. The supplied schematic does not establish the orientation of the assembled
+Try `--rotate 0`, `90`, `180`, or `270` until the bar is continuous. The default
+`--direction right-to-left --reverse-modules` matches the supplied hardware video:
+the DIN-nearest tile is on the right. `--direction left-to-right` changes which
+edge the bar grows from. If your board instead has the DIN-nearest tile on the
+left, use `--no-reverse-modules`. `--mirror` is an additional orientation flip,
+so leave it off for the filmed setup. Keep any rotation correction your board
+requires. The supplied schematic does not establish the orientation of the assembled
 four-tile board, so this is a required first-use check.
 
 ## 3. Read the gauge
@@ -96,10 +99,11 @@ unit, baud, sensor, or relay settings. Avoid changing units while it is sampling
 Then drive the LED bar (include any orientation flags found above):
 
 ```sh
-.venv/bin/gauge-reader --port /dev/ttyUSB0 --baud 9600 --brightness 2
+.venv/bin/gauge-reader --port /dev/ttyUSB0 --baud 9600 --brightness 0
 ```
 
-The default **vacuum** profile follows these pressure bands, all in **Torr**:
+The default **vacuum** profile follows these pressure bands, all in **Torr**.
+Tiles are counted from the right edge (the edge that lights first):
 
 | Valid pressure | Illuminated portion |
 | --- | --- |
@@ -112,9 +116,9 @@ The default **vacuum** profile follows these pressure bands, all in **Torr**:
 
 The mathematical fill is continuous at every pressure-band boundary: 256 LEDs
 at 5×10⁻⁸ Torr, 192 at 1×10⁻⁷, and 128 at 1×10⁻⁶. The hardware rounds to the
-nearest LED, giving 257 possible fill levels including empty. A partly filled
-column progresses bottom to top. In terminal output, `#` is a full column and
-`:` is a partial column. An OK-status zero pressure is invalid for this log scale
+nearest whole column, giving **33 fill levels**, including empty. Every lit
+column contains all eight LEDs. In terminal output, `#` is a full column and
+`.` is an unlit column; the default bar is anchored at the right. An OK-status zero pressure is invalid for this log scale
 and displays Xs. An underrange status is also an error, not a full-bar guarantee.
 
 Default oL blinking is approximately **one complete on/off cycle per second**.
@@ -166,7 +170,31 @@ is the pause after a normal sample, not a guaranteed sample rate. A serial
 timeout can take several timeout intervals during startup synchronization; an
 old bar is replaced once the failure is detected. Ctrl+C or SIGTERM attempts to
 blank/shut down the matrix and close the ports; SPI failure can prevent physical
-blanking. Brightness 0 means minimum intensity, not off; the range is 0–15.
+blanking.
+
+### Choose brightness before starting
+
+The new default is **`--brightness 0`**, the dimmest hardware setting. It applies
+to demo, normal readings, oL blinking, and fault patterns. This is not off.
+Choose a register level from **0 to 15** before starting either mode:
+
+```sh
+# Dimmest demo (the new default).
+.venv/bin/gauge-reader --demo --brightness 0
+
+# Brighter demo, or the same chosen brightness during real measurement.
+.venv/bin/gauge-reader --demo --brightness 3
+.venv/bin/gauge-reader --port /dev/ttyUSB0 --brightness 3
+
+# Optional: fill from the opposite edge instead.
+.venv/bin/gauge-reader --demo --direction left-to-right
+```
+
+The MAX7219 uses 16 intensity steps, not a calibrated visual percentage. For
+this MAX7219, level 0 uses 1/32 LED on-time and the previous default level 2
+uses 5/32: level 0 is about **20% of the previous on-time**. Perceived brightness
+and camera exposure do not necessarily change by that same percentage. Level
+15 is the brightest hardware setting (31/32 on-time).
 
 A finite `--frames` run returns 1 if its last sample is faulty or overrange, 0
 if valid; configuration/display-startup failures return 2. Without `--frames`,
@@ -216,5 +244,5 @@ orientation, or operation on a Raspberry Pi CPU.
 | Permission denied | Add your user to `dialout` and `spi`, then log out/in or reboot. |
 | No `/dev/spidev0.0` | Enable SPI and reboot. |
 | Matrix blank | Check 5 V power, common ground, level-shifter enable pins, and connection to the module's **input** header. |
-| Four sideways strips or scrambled order | Use demo mode to choose `--rotate` and `--reverse-modules`. |
+| Sideways strips, gaps, or scrambled order | Use demo mode to choose `--rotate` and module order (`--reverse-modules` or `--no-reverse-modules`). |
 | Pressure differs by a factor of 100 or 1000 | Compare the controller's units; use Pascal for the initial verification. |

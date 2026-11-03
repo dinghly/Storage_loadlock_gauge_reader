@@ -7,7 +7,7 @@ import math
 import signal
 import time
 
-from .display import Max7219Display, level_fraction, lit_pixels, vacuum_fraction
+from .display import Max7219Display, level_fraction, lit_columns, vacuum_fraction
 from .tpg261 import GaugeStatus, InvalidReadingError, TPG261, TPG261Error
 
 
@@ -61,9 +61,16 @@ def parse_args(argv=None):
     parser.add_argument("--invert", action="store_true", help="fill the bar as vacuum improves (pressure decreases)")
     parser.add_argument("--spi-bus", type=nonnegative_int, default=0, help="Linux SPI bus")
     parser.add_argument("--spi-device", type=nonnegative_int, default=0, help="Linux SPI chip select")
-    parser.add_argument("--brightness", type=int, choices=range(16), default=2, help="MAX7219 intensity, 0 is minimum brightness")
+    parser.add_argument("--brightness", type=int, choices=range(16), default=0, help="MAX7219 intensity, 0 is minimum brightness, not off")
+    parser.add_argument("--direction", choices=("right-to-left", "left-to-right"), default="right-to-left",
+                        help="edge from which the logical bar fills as pressure falls")
     parser.add_argument("--rotate", type=int, choices=(0, 90, 180, 270), default=0, help="clockwise rotation of each 8x8 tile")
-    parser.add_argument("--reverse-modules", action="store_true", help="reverse the physical order of the four tiles")
+    order = parser.add_mutually_exclusive_group()
+    order.add_argument("--reverse-modules", dest="reverse_modules", action="store_true",
+                       help="DIN-nearest tile is the rightmost tile (default; matches the supplied video)")
+    order.add_argument("--no-reverse-modules", dest="reverse_modules", action="store_false",
+                       help="DIN-nearest tile is the leftmost tile")
+    parser.set_defaults(reverse_modules=True)
     parser.add_argument("--mirror", action="store_true", help="mirror the logical image horizontally")
     parser.add_argument("--console", action="store_true", help="print a terminal bar instead of using SPI")
     parser.add_argument("--demo", action="store_true", help="use a synthetic pressure sweep instead of a serial gauge")
@@ -89,10 +96,15 @@ def parse_args(argv=None):
 class ConsoleDisplay:
     """A terminal backend that needs neither SPI nor an attached matrix."""
 
+    def __init__(self, direction="right-to-left"):
+        self.direction = direction
+
     def show_level(self, fraction):
-        columns, partial = divmod(lit_pixels(fraction), 8)
-        bar = "#" * columns + (":" if partial else "")
-        print("|" + bar + "." * (32 - len(bar)) + "|", flush=True)
+        columns = lit_columns(fraction)
+        bar = "#" * columns + "." * (32 - columns)
+        if self.direction == "right-to-left":
+            bar = bar[::-1]
+        print("|" + bar + "|", flush=True)
 
     def show_error(self):
         print("|XXXXXXXX  ERROR / NO VALID DATA  XXXXXXXX|", flush=True)
@@ -227,9 +239,10 @@ def main(argv=None):
     display = None
     previous_sigterm = signal.signal(signal.SIGTERM, _stop)
     try:
-        display = ConsoleDisplay() if args.console else Max7219Display(
+        display = ConsoleDisplay(direction=args.direction) if args.console else Max7219Display(
             bus=args.spi_bus, device=args.spi_device, intensity=args.brightness,
             rotate=args.rotate, reverse_modules=args.reverse_modules, mirror=args.mirror,
+            direction=args.direction,
         )
         if args.demo or args.demo_overrange:
             LOG.info("DEMO: synthetic pressures; no gauge is connected or read")
