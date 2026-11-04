@@ -202,6 +202,31 @@ the program runs until stopped. Demo inputs are synthetic; remove `--demo` or
 `--demo-overrange` for real measurements. Do not change controller units while
 sampling.
 
+## Read pressure using a single Python command
+
+`read_pressure.py` is self-contained: it needs only Python and pyserial, not the
+LED modules or an installed project package. On Raspberry Pi OS, install the
+system Python serial library once:
+
+```sh
+sudo apt update
+sudo apt install -y python3-serial
+```
+
+Then run from the folder containing the file:
+
+```sh
+python3 read_pressure.py
+```
+
+It prints a valid pressure in Torr every second, for example `2.100e-08 Torr`.
+Press Ctrl+C to stop. Edit `PORT` and `BAUD_RATE` near the top of the file to
+match the USB adapter and controller. `INTERVAL_SECONDS` defaults to 1.0.
+Read time is accounted for in scheduling; a communication timeout can delay
+sampling beyond one second. Errors and non-OK sensor statuses go to stderr,
+and no numeric placeholder is printed as a pressure. The connection is retried.
+The existing RS232 communication issue must still be resolved to obtain readings.
+
 ## Development / cloud testing
 
 Cloud testing does not require the Pi, serial adapter, or LED board:
