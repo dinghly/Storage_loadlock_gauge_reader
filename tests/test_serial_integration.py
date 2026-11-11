@@ -111,6 +111,13 @@ class EmulatedTPG261:
 
 @unittest.skipUnless(os.name == "posix" and serial is not None, "requires POSIX PTY and pyserial")
 class RealSerialIntegrationTests(unittest.TestCase):
+    def test_actual_padded_reply_reported_by_user(self):
+        with EmulatedTPG261(unit=b"1", pressure=b"0, 4.0600E-08") as peer:
+            with TPG261(peer.port, timeout=1.0) as gauge:
+                reading = gauge.read_pressure()
+            self.assertEqual(reading.status, GaugeStatus.OK)
+            self.assertEqual(reading.pressure_torr, 4.0600e-8)
+
     def test_real_serial_transport_and_pressure_conversion(self):
         with EmulatedTPG261() as peer:
             with TPG261(peer.port, timeout=1.0) as gauge:

@@ -27,7 +27,8 @@ STATUS_NAMES = {
     1: "UNDERRANGE", 2: "oL / OVERRANGE", 3: "SENSOR ERROR",
     4: "SENSOR OFF", 5: "NO SENSOR", 6: "IDENTIFICATION ERROR",
 }
-PRESSURE_PATTERN = re.compile(r"([0-6]),([+-]?\d+\.\d+[Ee][+-]?\d+)")
+# Some controllers pad the pressure field with spaces after the comma.
+PRESSURE_PATTERN = re.compile(r"([0-6])[ \t]*,[ \t]*([+-]?\d+\.\d+[Ee][+-]?\d+)")
 
 
 class GaugeError(Exception):

@@ -49,6 +49,18 @@ def response(pressure=b"0,1.0000E-03", unit=b"0"):
 
 
 class TPG261ProtocolTests(unittest.TestCase):
+    def test_pressure_field_padding_is_accepted_but_malformed_content_is_not(self):
+        for reply in ("0, 4.0600E-08", " 0 ,\t4.0600E-08 "):
+            with self.subTest(reply=reply):
+                reading = parse_pressure(reply, PressureUnit.TORR)
+                self.assertEqual(reading.pressure_torr, 4.0600e-8)
+        for reply in ("0, 4.0600E -08", "0, 4.0600E-08,extra", "0, "):
+            with self.subTest(reply=reply), self.assertRaises(ProtocolError):
+                parse_pressure(reply, PressureUnit.TORR)
+        fault = parse_pressure("5, 2.0000E-02", PressureUnit.MBAR)
+        with self.assertRaises(InvalidReadingError):
+            _ = fault.pressure_torr
+
     def client(self, fake):
         return TPG261("/dev/test-gauge", serial_factory=fake.factory)
 

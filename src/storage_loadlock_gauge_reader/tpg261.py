@@ -78,7 +78,8 @@ class Reading:
         return self.unit.to_mbar(self.pressure)
 
 
-_PRESSURE_REPLY = re.compile(r"([0-6]),([+-]?\d+\.\d+[Ee][+-]?\d+)")
+# Accept field padding observed on the controller without relaxing numeric syntax.
+_PRESSURE_REPLY = re.compile(r"([0-6])[ \t]*,[ \t]*([+-]?\d+\.\d+[Ee][+-]?\d+)")
 
 
 def parse_pressure(reply: str, unit: PressureUnit) -> Reading:

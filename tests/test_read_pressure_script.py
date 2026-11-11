@@ -40,6 +40,17 @@ class StandaloneReaderTests(unittest.TestCase):
         with self.assertRaisesRegex(reader.GaugeError, "No reply"):
             reader.read_line(port)
 
+    def test_controller_reply_with_padding_after_comma(self):
+        with EmulatedTPG261(unit=b"1", pressure=b"0, 4.0600E-08") as peer:
+            with reader.serial.Serial(peer.port, 9600, timeout=1, write_timeout=1) as port:
+                self.assertEqual(reader.read_pressure(port, synchronizing=True), 4.0600e-8)
+
+    def test_padding_does_not_hide_a_sensor_fault_or_invalid_number(self):
+        for raw in (b"5, 2.0000E-02", b"0, -4.0600E-08", b"0, 4.0600E -08",
+                    b"0, 4.0600E-08,extra"):
+            with self.subTest(raw=raw), patch.object(reader, "query", side_effect=[b"1", raw]), self.assertRaises(reader.GaugeError):
+                reader.read_pressure(Mock())
+
     def test_one_second_schedule_accounts_for_read_time_and_closes_on_ctrl_c(self):
         clock = {"now": 0.0}
         starts = []
