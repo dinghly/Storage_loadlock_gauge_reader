@@ -107,32 +107,29 @@ Tiles are counted from the right edge (the edge that lights first):
 
 | Valid pressure | Illuminated portion |
 | --- | --- |
-| At/below **5×10⁻⁸** | All four tiles full (256 LEDs). Your 2.1×10⁻⁸ reading gives a full bar. |
-| **5×10⁻⁸ to 1×10⁻⁷** | First three tiles full; fourth shrinks logarithmically as pressure rises. |
+| At/below **1.5×10⁻⁸** | All four tiles full (256 LEDs), matching the chamber's approximate lowest pressure. |
+| **1.5×10⁻⁸ to 1×10⁻⁷** | First three tiles full; fourth grows logarithmically as pressure falls toward 1.5×10⁻⁸. |
 | **1×10⁻⁷ to 1×10⁻⁶** | First two tiles full; third shrinks logarithmically as pressure rises. |
 | **1×10⁻⁶ to 760** | First two tiles shrink logarithmically toward an empty bar at atmosphere. |
-| **oL / OVERRANGE** (serial status 2) | All 256 LEDs blink on/off. Numeric placeholder values are ignored. |
-| Other invalid statuses or serial errors | Four X symbols, distinct from the overrange blink. |
+| **oL / OVERRANGE** (serial status 2) | Steady **XXXX**, one X on each tile. Numeric placeholder values are ignored. |
+| Other invalid statuses or serial errors | Steady **XXXX**; terminal warnings identify the fault. |
 
 The mathematical fill is continuous at every pressure-band boundary: 256 LEDs
-at 5×10⁻⁸ Torr, 192 at 1×10⁻⁷, and 128 at 1×10⁻⁶. The hardware rounds to the
+at 1.5×10⁻⁸ Torr, 192 at 1×10⁻⁷, and 128 at 1×10⁻⁶. The hardware rounds to the
 nearest whole column, giving **33 fill levels**, including empty. Every lit
 column contains all eight LEDs. In terminal output, `#` is a full column and
 `.` is an unlit column; the default bar is anchored at the right. An OK-status zero pressure is invalid for this log scale
 and displays Xs. An underrange status is also an error, not a full-bar guarantee.
 
-Default oL blinking is approximately **one complete on/off cycle per second**.
-`--blink-period` sets the cycle length; it is at least `--interval`. A new serial
-sample is read between cycles, so serial transaction time adds to that period.
-If a subsequent sample is a sensor/communication fault, blinking ends and the
-X pattern is shown after that failure is detected. A valid sample restores the
-normal bar automatically. The first blink phase is on. A finite `--frames` run
-exits and attempts blanking after its last sample; use continuous operation to
-observe the alarm.
+At fully vented **oL**, the display holds four X symbols steadily; it does not
+blink. Other sensor or communication faults also show XXXX, with their reason
+reported in the terminal. A valid sample restores the normal pressure bar
+automatically. A finite `--frames` run exits and attempts blanking after its last
+sample; use continuous operation to keep the indication visible.
 
 Use `--atmospheric-torr` to change the upper empty-bar endpoint if necessary
 (default 760 Torr). This is a visualization endpoint, not the gauge's maximum
-measurable pressure. The agreed 5×10⁻⁸, 1×10⁻⁷, and 1×10⁻⁶ thresholds are fixed
+measurable pressure. The agreed 1.5×10⁻⁸, 1×10⁻⁷, and 1×10⁻⁶ thresholds are fixed
 in the vacuum profile. This display indicates the selected pressure bands; it
 neither grants valve-open permission nor controls the gate valve.
 
@@ -142,14 +139,11 @@ Examples:
 # Check the agreed pressure bands without a physical gauge.
 .venv/bin/gauge-reader --demo
 
-# Check the all-LED oL blink without a physical gauge. Ctrl+C to stop.
+# Check steady XXXX for oL without a physical gauge. Ctrl+C to stop.
 .venv/bin/gauge-reader --demo-overrange
 
 # Print Torr pressures without driving SPI LEDs.
 .venv/bin/gauge-reader --port /dev/ttyUSB0 --console
-
-# Change the oL blink cycle to 2 seconds; keep the agreed pressure mapping.
-.venv/bin/gauge-reader --port /dev/ttyUSB0 --blink-period 2
 
 # Original configurable bar remains available under the generic profile.
 # These thresholds are in mbar; --invert fills as pressure decreases.
@@ -161,7 +155,7 @@ Examples:
 
 `--scale`, `--min-pressure`, `--max-pressure`, and `--invert` belong to the
 **generic** profile. Select `--profile generic` before using these original
-controls. oL blinking applies to both profiles. No RGB hardware or additional
+controls. Steady XXXX for oL applies to both profiles. No RGB hardware or additional
 color indicators are required.
 
 Serial errors trigger a close/reopen after `--retry-delay` (default 2 seconds).
@@ -175,7 +169,7 @@ blanking.
 ### Choose brightness before starting
 
 The new default is **`--brightness 0`**, the dimmest hardware setting. It applies
-to demo, normal readings, oL blinking, and fault patterns. This is not off.
+to demo, normal readings, the oL XXXX indication, and fault patterns. This is not off.
 Choose a register level from **0 to 15** before starting either mode:
 
 ```sh
@@ -201,6 +195,44 @@ if valid; configuration/display-startup failures return 2. Without `--frames`,
 the program runs until stopped. Demo inputs are synthetic; remove `--demo` or
 `--demo-overrange` for real measurements. Do not change controller units while
 sampling.
+
+## Run the LED meter using a Python filename
+
+Keep `led_pressure_meter.py` in the complete project folder, alongside the `src`
+directory. To run it with the system `python3`, install its serial and SPI
+libraries once through Raspberry Pi OS:
+
+```sh
+sudo apt update
+sudo apt install -y python3-serial python3-spidev
+```
+
+From the project folder, run:
+
+```sh
+python3 led_pressure_meter.py
+```
+
+It uses the same pressure bands, minimum brightness, whole-column fill, and
+right-to-left direction described above. Edit the serial port, controller baud,
+and brightness settings near the top of the launcher when needed. Its default
+pause is one second after each sample; communication time adds to that interval.
+Stop other programs using the gauge's serial port before starting it.
+
+Options can be supplied after the filename:
+
+```sh
+python3 led_pressure_meter.py --demo
+python3 led_pressure_meter.py --demo-overrange
+python3 led_pressure_meter.py --demo --console --frames 5
+```
+
+The first command tests the bar without the gauge; the second shows steady XXXX
+without the gauge; the third needs neither the gauge nor the LED board. Press
+Ctrl+C to stop a continuous run. If you already installed the project's virtual
+environment, you can instead use `.venv/bin/python led_pressure_meter.py`.
+The launcher loads the adjacent source directory, so keep that directory with it;
+copying only the launcher is insufficient.
 
 ## Read pressure using a single Python command
 
@@ -269,6 +301,7 @@ orientation, or operation on a Raspberry Pi CPU.
 
 ## Source files
 
+- `led_pressure_meter.py`: direct `python3` launcher for the LED meter.
 - `src/storage_loadlock_gauge_reader/tpg261.py`: TPG261 protocol and pressure units.
 - `src/storage_loadlock_gauge_reader/display.py`: scaling and four-chip SPI display.
 - `src/storage_loadlock_gauge_reader/cli.py`: polling, demo, options, and recovery.
@@ -279,8 +312,7 @@ orientation, or operation on a Raspberry Pi CPU.
 
 | Symptom | Check |
 | --- | --- |
-| Four Xs | Read terminal warnings; check gauge status, baud, device path, RS232 wiring, and USB adapter. |
-| All LEDs blink | The controller reported oL/overrange, or you selected `--demo-overrange`. |
+| Four Xs | The controller reported oL/overrange, another sensor fault, or a communication error. Read terminal warnings for the reason; `--demo-overrange` also intentionally shows XXXX. |
 | Timeout / no ACK | Confirm a real RS232 adapter and crossed TX/RX, not a TTL cable or a second null-modem crossover. Close other programs using the controller. |
 | Permission denied | Add your user to `dialout` and `spi`, then log out/in or reboot. |
 | No `/dev/spidev0.0` | Enable SPI and reboot. |

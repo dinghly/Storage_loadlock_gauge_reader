@@ -48,7 +48,7 @@ class MeterTests(unittest.TestCase):
     def test_every_fault_status_replaces_a_previous_valid_bar(self):
         for status in list(GaugeStatus)[1:]:
             if status == GaugeStatus.OVERRANGE:
-                continue  # oL has its own blinking indication.
+                continue  # oL is covered separately below.
             with self.subTest(status=status):
                 reader = Mock()
                 reader.read_pressure.side_effect = [
@@ -156,7 +156,7 @@ class MeterTests(unittest.TestCase):
         self.assertIn("|################################|", stdout.getvalue())
 
     def test_vacuum_profile_is_default_and_uses_native_torr_bands(self):
-        for pressure, expected in ((2.1e-8, 1), (5e-8, 1), (1e-7, .75),
+        for pressure, expected in ((1.5e-8, 1), (1e-8, 1), (1e-7, .75),
                                    (1e-6, .5), (760, 0)):
             with self.subTest(pressure=pressure):
                 reader = Mock()
@@ -167,24 +167,23 @@ class MeterTests(unittest.TestCase):
                 self.assertEqual(run_meter(args, display, Mock(return_value=reader)), 0)
                 self.assertAlmostEqual(display.events[0][1], expected)
 
-    def test_oL_blinks_all_pixels_then_recovers_without_reopening(self):
+    def test_oL_shows_steady_Xs_then_recovers_without_reopening(self):
         reader = Mock()
         reader.read_pressure.side_effect = [
             Reading(GaugeStatus.OVERRANGE, 0, PressureUnit.TORR),
             Reading(GaugeStatus.OVERRANGE, 9999, PressureUnit.TORR),
-            Reading(GaugeStatus.OK, 5e-8, PressureUnit.TORR),
+            Reading(GaugeStatus.OK, 1.5e-8, PressureUnit.TORR),
         ]
         display, sleep = FakeDisplay(), Mock()
         with self.assertLogs(level="INFO"):
             result = run_meter(parse_args(["--frames", "3"]), display, Mock(return_value=reader), sleep)
         self.assertEqual(result, 0)
-        self.assertEqual(display.events, [("level", 1), ("level", 0),
-                                          ("level", 1), ("level", 0), ("level", 1)])
-        self.assertEqual([c.args[0] for c in sleep.call_args_list], [.5, .5, .5, .5])
+        self.assertEqual(display.events, [("error",), ("error",), ("level", 1)])
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [.25, .25])
         reader.open.assert_called_once()
         reader.close.assert_called_once()
 
-    def test_oL_followed_by_sensor_fault_shows_X_instead_of_blinking(self):
+    def test_oL_followed_by_sensor_fault_keeps_Xs(self):
         reader = Mock()
         reader.read_pressure.side_effect = [
             Reading(GaugeStatus.OVERRANGE, 0, PressureUnit.TORR),
@@ -195,7 +194,7 @@ class MeterTests(unittest.TestCase):
             result = run_meter(parse_args(["--frames", "2"]), display,
                                Mock(return_value=reader), sleep=lambda _: None)
         self.assertEqual(result, 1)
-        self.assertEqual(display.events, [("level", 1), ("level", 0), ("error",)])
+        self.assertEqual(display.events, [("error",), ("error",)])
 
     def test_overrange_demo_does_not_open_serial(self):
         display, factory = FakeDisplay(), Mock()
@@ -204,11 +203,11 @@ class MeterTests(unittest.TestCase):
                                display, factory, sleep=lambda _: None)
         factory.assert_not_called()
         self.assertEqual(result, 1)  # Overrange is not a valid numeric pressure.
-        self.assertEqual(display.events, [("level", 1), ("level", 0), ("level", 1)])
+        self.assertEqual(display.events, [("error",), ("error",)])
 
     def test_vacuum_profile_rejects_incompatible_generic_controls(self):
         for extra in (["--invert"], ["--scale", "linear"], ["--min-pressure", "1e-8"],
-                      ["--atmospheric-torr", "1e-6"], ["--blink-period", "0"],
+                      ["--atmospheric-torr", "1e-6"], ["--atmospheric-torr", "nan"],
                       ["--demo", "--demo-overrange"]):
             with self.subTest(extra=extra), redirect_stderr(StringIO()), self.assertRaises(SystemExit):
                 parse_args(extra)
@@ -230,6 +229,11 @@ class MeterTests(unittest.TestCase):
             with redirect_stdout(output):
                 ConsoleDisplay(direction).show_level(9 / 32 + .001)
             self.assertEqual(output.getvalue().strip(), "|" + expected + "|")
+
+    def test_running_from_source_does_not_require_installed_package_metadata(self):
+        from importlib.metadata import PackageNotFoundError
+        with patch("storage_loadlock_gauge_reader.cli.version", side_effect=PackageNotFoundError):
+            self.assertEqual(parse_args([]).brightness, 0)
 
 
 if __name__ == "__main__":

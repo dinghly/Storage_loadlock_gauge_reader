@@ -1,31 +1,45 @@
-"""Agreed Torr boundaries, continuity, unit independence, and fine pixel fill."""
+"""Agreed Torr boundaries, continuity, unit independence, and whole-column fill."""
 
 import math
 import unittest
 from unittest.mock import patch
 import types
 
-from storage_loadlock_gauge_reader.display import Max7219Display, vacuum_fraction
+from storage_loadlock_gauge_reader.display import Max7219Display, lit_columns, vacuum_fraction
 from storage_loadlock_gauge_reader.tpg261 import Reading, PressureUnit, GaugeStatus, InvalidReadingError
 from test_display import FakeSpi, wire_pixels
 
 
 class VacuumBandsTests(unittest.TestCase):
     def test_agreed_boundaries(self):
-        for pressure, expected in ((2.1e-8, 1), (5e-8, 1), (1e-7, .75),
+        for pressure, expected in ((1e-8, 1), (1.5e-8, 1), (1e-7, .75),
                                    (1e-6, .5), (760, 0), (1000, 0)):
             with self.subTest(pressure=pressure):
                 self.assertAlmostEqual(vacuum_fraction(pressure), expected)
 
     def test_geometric_midpoints_give_half_of_each_log_segment(self):
-        self.assertAlmostEqual(vacuum_fraction(math.sqrt(5e-8 * 1e-7)), .875)
+        self.assertAlmostEqual(vacuum_fraction(math.sqrt(1.5e-8 * 1e-7)), .875)
         self.assertAlmostEqual(vacuum_fraction(math.sqrt(1e-7 * 1e-6)), .625)
         self.assertAlmostEqual(vacuum_fraction(math.sqrt(1e-6 * 760)), .25)
 
     def test_continuous_at_both_tile_boundaries_and_full_threshold(self):
-        for pressure in (5e-8, 1e-7, 1e-6):
+        for pressure in (1.5e-8, 1e-7, 1e-6):
             self.assertAlmostEqual(vacuum_fraction(pressure * (1 - 1e-10)),
                                    vacuum_fraction(pressure * (1 + 1e-10)), places=8)
+
+    def test_observed_pressures_progress_in_their_correct_tiles(self):
+        # 4.06e-8 Torr fills three full tiles plus four columns of the fourth.
+        self.assertEqual(lit_columns(vacuum_fraction(4.06e-8)), 28)
+        self.assertGreater(vacuum_fraction(4.06e-8), .75)
+        self.assertLess(vacuum_fraction(4.06e-8), 1)
+        # 2.93e-7 Torr fills two full tiles plus four columns of the third.
+        self.assertEqual(lit_columns(vacuum_fraction(2.93e-7)), 20)
+        self.assertGreater(vacuum_fraction(2.93e-7), .5)
+        self.assertLess(vacuum_fraction(2.93e-7), .75)
+
+    def test_fourth_tile_starts_dimming_above_the_new_pressure_floor(self):
+        self.assertLess(vacuum_fraction(2.1e-8), 1)
+        self.assertLess(vacuum_fraction(5e-8), vacuum_fraction(2.1e-8))
 
     def test_fill_never_increases_as_pressure_rises(self):
         pressures = [10 ** (-10 + i * .01) for i in range(1401)]

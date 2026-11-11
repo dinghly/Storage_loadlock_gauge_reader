@@ -1,7 +1,7 @@
 """Run the TPG261 pressure meter, or exercise it without attached hardware."""
 
 import argparse
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 import logging
 import math
 import signal
@@ -41,8 +41,11 @@ def parse_args(argv=None):
         description="TPG261 pressure level meter on a four-module MAX7219 32x8 matrix.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--version", action="version",
-                        version=f"%(prog)s {version('storage-loadlock-gauge-reader')}")
+    try:
+        package_version = version('storage-loadlock-gauge-reader')
+    except PackageNotFoundError:
+        package_version = "source checkout"
+    parser.add_argument("--version", action="version", version=f"%(prog)s {package_version}")
     parser.add_argument("--port", default="/dev/ttyUSB0", help="USB RS232 serial device")
     parser.add_argument("--baud", type=int, choices=(9600, 19200, 38400), default=9600,
                         help="must match the TPG261 front-panel setting")
@@ -53,8 +56,6 @@ def parse_args(argv=None):
                         help="vacuum: agreed Torr bands; generic: original configurable mbar bar")
     parser.add_argument("--atmospheric-torr", type=positive_float, default=760.0,
                         help="empty-bar endpoint in Torr for the vacuum profile")
-    parser.add_argument("--blink-period", type=positive_float, default=1.0,
-                        help="oL cycle duration in seconds, excluding serial queries; at least --interval")
     parser.add_argument("--min-pressure", type=nonnegative_float, default=1e-6, help="empty-bar threshold in mbar (before --invert)")
     parser.add_argument("--max-pressure", type=positive_float, default=1000.0, help="full-bar threshold in mbar (before --invert)")
     parser.add_argument("--scale", choices=("log", "linear"), default="log", help="pressure scale")
@@ -74,7 +75,7 @@ def parse_args(argv=None):
     parser.add_argument("--mirror", action="store_true", help="mirror the logical image horizontally")
     parser.add_argument("--console", action="store_true", help="print a terminal bar instead of using SPI")
     parser.add_argument("--demo", action="store_true", help="use a synthetic pressure sweep instead of a serial gauge")
-    parser.add_argument("--demo-overrange", action="store_true", help="simulate oL and blink; no gauge is read")
+    parser.add_argument("--demo-overrange", action="store_true", help="simulate oL and show XXXX; no gauge is read")
     parser.add_argument("--frames", type=nonnegative_int, default=0, help="stop after this many samples; 0 runs until Ctrl+C")
     parser.add_argument("--list-ports", action="store_true", help="list serial devices and exit")
     parser.add_argument("--verbose", action="store_true", help="log each reading and diagnostic details")
@@ -149,7 +150,7 @@ def run_meter(args, display, reader_factory=TPG261, sleep=time.sleep):
                     overrange = True
                 elif args.demo:
                     if args.profile == "vacuum":
-                        pressure_torr = demo_pressure(frame, 2.1e-8, args.atmospheric_torr, "log")
+                        pressure_torr = demo_pressure(frame, 1.5e-8, args.atmospheric_torr, "log")
                     else:
                         pressure = demo_pressure(frame, args.min_pressure, args.max_pressure, args.scale)
                 else:
@@ -184,9 +185,9 @@ def run_meter(args, display, reader_factory=TPG261, sleep=time.sleep):
 
             healthy = fault is None and not overrange
             if overrange:
-                display.show_level(1.0)
+                display.show_error()
                 if last_fault != "oL / OVERRANGE":
-                    LOG.warning("oL / OVERRANGE: blinking all LEDs")
+                    LOG.warning("oL / OVERRANGE: displaying XXXX")
                 last_fault = "oL / OVERRANGE"
             elif fault is not None:
                 # SPI errors are fatal, not a reason to reconnect the gauge.
@@ -206,13 +207,7 @@ def run_meter(args, display, reader_factory=TPG261, sleep=time.sleep):
                     print(f"{label}: {value:.6g} {unit}; {fraction:.1%}", flush=True)
             frame += 1
             if args.frames == 0 or frame < args.frames:
-                if overrange:
-                    half_period = max(args.blink_period, args.interval) / 2
-                    sleep(half_period)
-                    display.show_level(0.0)
-                    sleep(half_period)
-                else:
-                    sleep(args.retry_delay if reconnect else args.interval)
+                sleep(args.retry_delay if reconnect else args.interval)
     finally:
         disconnect()
     return 0 if healthy else 1

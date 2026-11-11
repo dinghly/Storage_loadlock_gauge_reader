@@ -13,7 +13,7 @@ from typing import Iterable, Tuple
 def vacuum_fraction(pressure_torr: float, atmospheric_torr: float = 760.0) -> float:
     """Continuous, piecewise-log bar for the load-lock, using Torr throughout.
 
-    5e-8 -> 32 columns, 1e-7 -> 24, 1e-6 -> 16, atmosphere -> 0.
+    1.5e-8 -> 32 columns, 1e-7 -> 24, 1e-6 -> 16, atmosphere -> 0.
     Lower positive pressures saturate at full. Fault/status handling is separate.
     """
     pressure_torr, atmospheric_torr = float(pressure_torr), float(atmospheric_torr)
@@ -21,10 +21,10 @@ def vacuum_fraction(pressure_torr: float, atmospheric_torr: float = 760.0) -> fl
         raise ValueError("vacuum pressure must be finite and positive")
     if not math.isfinite(atmospheric_torr) or atmospheric_torr <= 1e-6:
         raise ValueError("atmospheric pressure must be finite and above 1e-6 Torr")
-    if pressure_torr <= 5e-8:
+    if pressure_torr <= 1.5e-8:
         return 1.0
     for low, high, start, end in (
-        (5e-8, 1e-7, 1.0, 0.75),
+        (1.5e-8, 1e-7, 1.0, 0.75),
         (1e-7, 1e-6, 0.75, 0.5),
         (1e-6, atmospheric_torr, 0.5, 0.0),
     ):
