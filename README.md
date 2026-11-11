@@ -227,6 +227,22 @@ sampling beyond one second. Errors and non-OK sensor statuses go to stderr,
 and no numeric placeholder is printed as a pressure. The connection is retried.
 The existing RS232 communication issue must still be resolved to obtain readings.
 
+For the controller's **raw pressure reply**, without any numeric parsing, status
+interpretation, or unit conversion, use the separate standalone script:
+
+```sh
+python3 read_raw_pressure.py
+```
+
+This sends TPG261 `PR1`, waits for ACK, then sends ENQ. It prints the received
+bytes with `repr`, for example `b'0, 4.0600E-08\r\n'`, preserving whitespace,
+status, and terminators. An empty data reply prints `b''`. A missing or invalid
+ACK is reported separately to stderr. The value uses the controller's selected
+unit. It targets a one-second interval; timeouts can make this longer. Stop other
+programs using the serial port first. This script uses the same system pyserial
+dependency as `read_pressure.py`. The uploaded example's `#000F` command belongs
+to a different controller protocol and is not sent to the TPG261.
+
 ## Development / cloud testing
 
 Cloud testing does not require the Pi, serial adapter, or LED board:
