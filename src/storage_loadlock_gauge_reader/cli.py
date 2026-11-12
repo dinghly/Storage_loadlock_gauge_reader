@@ -9,6 +9,7 @@ import time
 
 from .display import Max7219Display, level_fraction, lit_columns, vacuum_fraction
 from .eta import PumpdownEstimator, format_eta
+from .pressure_log import PressureLog
 from .tpg261 import GaugeStatus, InvalidReadingError, TPG261, TPG261Error
 
 
@@ -88,7 +89,11 @@ def parse_args(argv=None):
     parser.add_argument("--frames", type=nonnegative_int, default=0, help="stop after this many samples; 0 runs until Ctrl+C")
     parser.add_argument("--list-ports", action="store_true", help="list serial devices and exit")
     parser.add_argument("--verbose", action="store_true", help="log each reading and diagnostic details")
+    parser.add_argument("--log-pressure", metavar="CSV", help="save timestamped pressure to a new CSV file")
+    parser.add_argument("--log-only", action="store_true", help="record CSV without SPI or console bars")
     args = parser.parse_args(argv)
+    if args.log_only and not args.log_pressure:
+        parser.error("--log-only requires --log-pressure CSV")
     if args.atmospheric_torr <= 1e-6:
         parser.error("--atmospheric-torr must exceed 1e-6 Torr")
     if args.eta_window < args.eta_min_span:
@@ -133,6 +138,25 @@ class ConsoleDisplay:
         pass
 
 
+class NoDisplay:
+    """Logging without opening or writing to the SPI display."""
+
+    def show_level(self, fraction):
+        pass
+
+    def show_error(self):
+        pass
+
+    def show_vented(self):
+        pass
+
+    def show_eta(self, fraction, text):
+        pass
+
+    def close(self):
+        pass
+
+
 def demo_pressure(frame, low, high, scale):
     """Sweep through the range and back once per 64 sample intervals."""
     phase = frame % 64
@@ -152,7 +176,8 @@ def demo_pumpdown(frame):
     return None  # Simulated oL, not a numeric measurement.
 
 
-def run_meter(args, display, reader_factory=TPG261, sleep=time.sleep, clock=time.monotonic):
+def run_meter(args, display, reader_factory=TPG261, sleep=time.sleep, clock=time.monotonic,
+              pressure_log=None):
     """Poll, replace invalid/stale data with Xs, and reconnect after serial faults."""
     reader = None
     frame = 0
@@ -177,6 +202,7 @@ def run_meter(args, display, reader_factory=TPG261, sleep=time.sleep, clock=time
             fault = None
             overrange = False
             estimate = None
+            logged_pressure = None
             try:
                 if args.demo_overrange:
                     overrange = True
@@ -204,11 +230,15 @@ def run_meter(args, display, reader_factory=TPG261, sleep=time.sleep, clock=time
                     else:
                         pressure = reading.pressure_mbar
                 if not overrange:
+                    logged_pressure = (pressure_torr if args.profile == "vacuum"
+                                       else pressure / 1.3332236842105263)
                     if args.profile == "vacuum":
                         fraction = vacuum_fraction(pressure_torr, args.atmospheric_torr)
                         if not args.no_eta:
                             sample_time = frame * 10.0 if args.demo_pumpdown else clock()
                             estimate = estimator.update(sample_time, pressure_torr)
+                            if estimate is None:
+                                LOG.debug("ETA hidden: %s", estimator.reason)
                     else:
                         fraction = level_fraction(pressure, args.min_pressure, args.max_pressure,
                                                   args.scale, args.invert)
@@ -224,6 +254,11 @@ def run_meter(args, display, reader_factory=TPG261, sleep=time.sleep, clock=time
                 fault = str(exc)
 
             healthy = fault is None and not overrange
+            if pressure_log is not None:
+                status = "OVERRANGE" if overrange else (f"ERROR: {fault}" if fault else "OK")
+                if args.demo or args.demo_overrange or args.demo_pumpdown:
+                    status = "DEMO_" + status
+                pressure_log.write(logged_pressure if healthy else None, status)
             if overrange:
                 estimator.reset()
                 display.show_vented()
@@ -279,20 +314,29 @@ def main(argv=None):
         return 0
 
     display = None
+    pressure_log = None
     previous_sigterm = signal.signal(signal.SIGTERM, _stop)
     try:
-        display = ConsoleDisplay(direction=args.direction) if args.console else Max7219Display(
-            bus=args.spi_bus, device=args.spi_device, intensity=args.brightness,
-            rotate=args.rotate, reverse_modules=args.reverse_modules, mirror=args.mirror,
-            direction=args.direction,
-        )
+        if args.log_pressure:
+            pressure_log = PressureLog(args.log_pressure)
+            LOG.info("Saving pressure to %s (Ctrl+C to stop)", pressure_log.path)
+        if args.log_only:
+            display = NoDisplay()
+        elif args.console:
+            display = ConsoleDisplay(direction=args.direction)
+        else:
+            display = Max7219Display(
+                bus=args.spi_bus, device=args.spi_device, intensity=args.brightness,
+                rotate=args.rotate, reverse_modules=args.reverse_modules, mirror=args.mirror,
+                direction=args.direction,
+            )
         if args.demo or args.demo_overrange or args.demo_pumpdown:
             LOG.info("DEMO: synthetic pressures; no gauge is connected or read")
             if args.demo_pumpdown:
                 LOG.info("DEMO: 10 virtual seconds per sample; estimates are simulated")
         else:
             LOG.info("Reading TPG261 at %s, %d baud", args.port, args.baud)
-        return run_meter(args, display)
+        return run_meter(args, display, pressure_log=pressure_log)
     except KeyboardInterrupt:
         LOG.info("Stopped")
         return 0
@@ -306,3 +350,5 @@ def main(argv=None):
                 display.close()
             except OSError as exc:
                 LOG.error("Could not blank/close the display: %s", exc)
+        if pressure_log is not None:
+            pressure_log.close()

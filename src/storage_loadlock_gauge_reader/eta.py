@@ -105,6 +105,7 @@ class PumpdownEstimator:
         self._last_timestamp = None
         self._last_pressure = None
         self._rising_streak = 0
+        self.reason = "history cleared; collecting fresh pressure data"
 
     def _seed(self, timestamp, pressure):
         self.reset()
@@ -117,25 +118,31 @@ class PumpdownEstimator:
 
         Nonfinite/nonpositive pressure and invalid times reset and return None.
         At 5e-8 Torr or below the requested goal is reached and history is reset.
+        ``reason`` explains the latest outcome, without changing the fit rules.
         """
         try:
             timestamp, pressure = float(timestamp_monotonic), float(pressure_torr)
         except (TypeError, ValueError):
             self.reset()
+            self.reason = "invalid timestamp or pressure"
             return None
         if not math.isfinite(timestamp) or not math.isfinite(pressure) or pressure <= 0:
             self.reset()
+            self.reason = "timestamp must be finite and pressure finite and positive"
             return None
         if pressure <= 5e-8:
             self.reset()
+            self.reason = "goal reached: pressure is at or below 5e-8 Torr"
             return None
         if self._last_timestamp is not None:
             gap = timestamp - self._last_timestamp
             if gap <= 0:
                 self.reset()
+                self.reason = "timestamp did not increase; history cleared"
                 return None
             if gap > self.max_gap_seconds:
                 self._seed(timestamp, pressure)
+                self.reason = f"sample gap {gap:.1f}s exceeds {self.max_gap_seconds:g}s; collecting fresh data"
                 return None
 
         previous_pressure = self._last_pressure
@@ -150,6 +157,7 @@ class PumpdownEstimator:
             sustained_rise = slope > 0 and pressure > recent[0][1] * 1.002
         if jump or cumulative_rise or self._rising_streak >= 3 or sustained_rise:
             self._seed(timestamp, pressure)
+            self.reason = "pressure rise detected; history cleared"
             return None
 
         self._samples.append((timestamp, pressure))
@@ -158,25 +166,41 @@ class PumpdownEstimator:
         while self._samples and timestamp - self._samples[0][0] > self.window_seconds:
             self._samples.popleft()
         if upward:
+            self.reason = "pressure increased since the previous reading"
             return None
         # A formerly good global fit must not keep predicting while the most
         # recent readings have stopped falling. Quantization/noise below 0.1%
         # over at least ten seconds does not establish continuing pump-down.
         if recent and timestamp - recent[0][0] >= 10:
             if pressure > recent[0][1] * 0.999:
+                self.reason = "recent pressure plateau: less than 0.1% decrease over at least 10s"
                 return None
         if len(self._samples) < self.min_samples:
+            self.reason = f"collecting samples: {len(self._samples)}/{self.min_samples}"
             return None
-        if timestamp - self._samples[0][0] < self.min_span_seconds:
+        span = timestamp - self._samples[0][0]
+        if span < self.min_span_seconds:
+            self.reason = f"collecting history: {span:.1f}/{self.min_span_seconds:g}s"
             return None
         if pressure > self._samples[0][1] * (1 - self.min_relative_drop):
+            drop = 100 * (1 - pressure / self._samples[0][1])
+            self.reason = f"net pressure drop {drop:.2f}% is below required {100 * self.min_relative_drop:g}%"
             return None
 
         slope, quality = _log_fit(self._samples)
-        if slope >= 0 or quality < self.min_r_squared:
+        if slope >= 0:
+            self.reason = "fitted pressure trend is not falling"
+            return None
+        if quality < self.min_r_squared:
+            self.reason = f"fit R² {quality:.3f} is below required {self.min_r_squared:g}"
             return None
         target = 1e-7 if pressure > 1e-7 else 5e-8
         seconds = math.log(target / pressure) / slope
-        if not math.isfinite(seconds) or seconds <= 0 or seconds > self.max_eta_seconds:
+        if not math.isfinite(seconds) or seconds <= 0:
+            self.reason = "predicted remaining time is not finite and positive"
             return None
+        if seconds > self.max_eta_seconds:
+            self.reason = f"predicted ETA {seconds / 3600:.1f}h exceeds limit {self.max_eta_seconds / 3600:g}h"
+            return None
+        self.reason = f"estimate available; falling trend, R²={quality:.3f}"
         return Estimate(seconds=seconds, target_torr=target, r_squared=quality)

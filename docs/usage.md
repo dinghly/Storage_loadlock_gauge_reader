@@ -350,6 +350,59 @@ programs using the serial port first. This script uses the same system pyserial
 dependency as `read_pressure.py`. The uploaded example's `#000F` command belongs
 to a different controller protocol and is not sent to the TPG261.
 
+## Save pressure readings for pumpdown analysis
+
+To record pressure without using the LED display, run from the complete project
+folder (keep the `src` folder alongside the script):
+
+```sh
+python3 log_pressure.py
+```
+
+It creates a new `pressure_log_YYYYMMDD_HHMMSS_microseconds.csv` beside the script
+and records at a nominal one-second interval. The actual interval includes serial
+read time. Press Ctrl+C to stop; the CSV is flushed after each row and closed on
+exit. Copy or upload that CSV for later analysis. Existing log files are never
+overwritten, and automatically named pressure logs are excluded from Git.
+
+The four columns are:
+
+```text
+timestamp,elapsed_seconds,pressure_torr,status
+```
+
+The timestamp includes the Pi's local UTC offset; elapsed seconds use a monotonic
+clock. Only valid pressure is recorded numerically, always converted to Torr.
+Vented/sensor/communication errors have an empty pressure field and a status
+describing the problem, so their numeric placeholders cannot distort a fit.
+Demo records are explicitly marked `DEMO_...` and are not real measurements.
+
+You can also record while watching the LED meter, using a new filename each run:
+
+```sh
+python3 led_pressure_meter.py --log-pressure pressure_log_1.csv --verbose
+```
+
+Use this combined command instead of starting `log_pressure.py` at the same time:
+only one process should read the gauge's serial port. An existing CSV destination
+is rejected to protect the previous record. Stop with Ctrl+C before copying the
+file. An unmodified `python3 led_pressure_meter.py` does not create a CSV.
+
+### Why an ETA can be missing at 1.7e-7 Torr
+
+That pressure is eligible for an ETA to 1e-7 Torr, but a single value cannot
+establish the falling-pressure trend. The checks described above still apply:
+fresh history of at least 60 seconds/10 samples, at least 2% net fall in the
+rolling window, R² at least 0.9, recent decline rather than a plateau, no upward
+reading, and a prediction no longer than 24 hours. Quantized/stair-step sensor
+readings can look flat between changes. Restarting the program resets history.
+
+Use `--verbose` to see the actual reason for the current frame, such as
+`ETA hidden: collecting ...`, a pressure rise, recent plateau, insufficient
+decline, or a poor fit. This diagnostic does not relax the estimator's checks.
+The recorded CSV can be used to evaluate those checks and calibrate a model
+against a real pumpdown rather than guessing from one pressure value.
+
 ## Development / cloud testing
 
 Cloud testing does not require the Pi, serial adapter, or LED board:
@@ -378,9 +431,11 @@ orientation, or operation on a Raspberry Pi CPU.
 ## Source files
 
 - `led_pressure_meter.py`: direct `python3` launcher for the LED meter.
+- `log_pressure.py`: one-second CSV logging without the LED display.
 - `src/storage_loadlock_gauge_reader/tpg261.py`: TPG261 protocol and pressure units.
 - `src/storage_loadlock_gauge_reader/display.py`: scaling, text, and four-chip SPI display.
 - `src/storage_loadlock_gauge_reader/eta.py`: rolling pumpdown trend and time estimate.
+- `src/storage_loadlock_gauge_reader/pressure_log.py`: flushed, timestamped CSV records.
 - `src/storage_loadlock_gauge_reader/cli.py`: polling, demo, options, and recovery.
 - `docs/hardware.md`: wiring, power, serial settings, and manual references.
 - `tests/`: hardware-independent protocol, display, and application tests.

@@ -2,6 +2,7 @@
 
 import math
 import unittest
+from unittest.mock import patch
 
 from storage_loadlock_gauge_reader.eta import PumpdownEstimator, format_eta
 
@@ -129,6 +130,64 @@ class PumpdownEstimatorTests(unittest.TestCase):
                        {"min_relative_drop": -1}, {"max_gap_seconds": 0}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 PumpdownEstimator(**kwargs)
+
+    def test_reason_reports_fresh_history_and_valid_estimate_at_1_7e_7(self):
+        estimator = PumpdownEstimator()
+        self.assertIn("history cleared", estimator.reason)
+        self.assertIsNone(estimator.update(0, 1.7e-7))
+        self.assertIn("collecting samples", estimator.reason)
+        for second in range(1, 10):
+            estimator.update(second, 1.7e-7 * math.exp(-.001 * second))
+        self.assertIn("collecting history", estimator.reason)
+
+        estimator.reset()
+        initial = 1.7e-7 * math.exp(1.2)
+        result = self.falling(estimator, initial=initial)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.target_torr, 1e-7)
+        self.assertIn("estimate available", estimator.reason)
+
+    def test_reason_distinguishes_plateau_small_drop_and_poor_fit(self):
+        estimator = PumpdownEstimator()
+        for second in range(20):
+            estimator.update(second, 1.7e-7)
+        self.assertIn("plateau", estimator.reason)
+
+        estimator = PumpdownEstimator()
+        self.assertIsNone(self.falling(estimator, initial=1.7e-7, rate=.0001))
+        self.assertIn("net pressure drop", estimator.reason)
+        self.assertIn("below required 2%", estimator.reason)
+
+        estimator = PumpdownEstimator()
+        self.falling(estimator)
+        with patch("storage_loadlock_gauge_reader.eta._log_fit", return_value=(-.01, .5)):
+            self.assertIsNone(estimator.update(121, 1e-5 * math.exp(-1.21)))
+        self.assertIn("fit R²", estimator.reason)
+
+    def test_reason_survives_rise_goal_gap_and_invalid_data_resets(self):
+        estimator = PumpdownEstimator()
+        self.falling(estimator)
+        last = 1e-5 * math.exp(-1.2)
+        estimator.update(121, last * 1.001)
+        self.assertIn("increased", estimator.reason)
+        estimator.update(122, last * 1.1)
+        self.assertIn("rise detected", estimator.reason)
+        estimator.update(1000, 1.7e-7)
+        self.assertIn("sample gap", estimator.reason)
+        estimator.update(1000, 1.7e-7)
+        self.assertIn("timestamp did not increase", estimator.reason)
+        estimator.update(1001, math.nan)
+        self.assertIn("finite", estimator.reason)
+        estimator.update(1002, "invalid")
+        self.assertIn("invalid timestamp or pressure", estimator.reason)
+        estimator.update(1003, 5e-8)
+        self.assertIn("goal reached", estimator.reason)
+
+    def test_reason_reports_excessive_prediction_horizon(self):
+        estimator = PumpdownEstimator(max_eta_seconds=100)
+        self.assertIsNone(self.falling(estimator))
+        self.assertIn("predicted ETA", estimator.reason)
+        self.assertIn("exceeds limit", estimator.reason)
 
 
 class EtaFormattingTests(unittest.TestCase):
