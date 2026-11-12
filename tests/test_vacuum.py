@@ -12,15 +12,15 @@ from test_display import FakeSpi, wire_pixels
 
 class VacuumBandsTests(unittest.TestCase):
     def test_agreed_boundaries(self):
-        for pressure, expected in ((1e-8, 1), (1.5e-8, 1), (1e-7, .75),
-                                   (1e-6, .5), (760, 0), (1000, 0)):
+        for pressure, expected in ((1e-8, 0), (1.5e-8, 0), (1e-7, .25),
+                                   (1e-6, .5), (760, 1), (1000, 1)):
             with self.subTest(pressure=pressure):
                 self.assertAlmostEqual(vacuum_fraction(pressure), expected)
 
     def test_geometric_midpoints_give_half_of_each_log_segment(self):
-        self.assertAlmostEqual(vacuum_fraction(math.sqrt(1.5e-8 * 1e-7)), .875)
-        self.assertAlmostEqual(vacuum_fraction(math.sqrt(1e-7 * 1e-6)), .625)
-        self.assertAlmostEqual(vacuum_fraction(math.sqrt(1e-6 * 760)), .25)
+        self.assertAlmostEqual(vacuum_fraction(math.sqrt(1.5e-8 * 1e-7)), .125)
+        self.assertAlmostEqual(vacuum_fraction(math.sqrt(1e-7 * 1e-6)), .375)
+        self.assertAlmostEqual(vacuum_fraction(math.sqrt(1e-6 * 760)), .75)
 
     def test_continuous_at_both_tile_boundaries_and_full_threshold(self):
         for pressure in (1.5e-8, 1e-7, 1e-6):
@@ -28,24 +28,23 @@ class VacuumBandsTests(unittest.TestCase):
                                    vacuum_fraction(pressure * (1 + 1e-10)), places=8)
 
     def test_observed_pressures_progress_in_their_correct_tiles(self):
-        # 4.06e-8 Torr fills three full tiles plus four columns of the fourth.
-        self.assertEqual(lit_columns(vacuum_fraction(4.06e-8)), 28)
-        self.assertGreater(vacuum_fraction(4.06e-8), .75)
-        self.assertLess(vacuum_fraction(4.06e-8), 1)
-        # 2.93e-7 Torr fills two full tiles plus four columns of the third.
-        self.assertEqual(lit_columns(vacuum_fraction(2.93e-7)), 20)
-        self.assertGreater(vacuum_fraction(2.93e-7), .5)
-        self.assertLess(vacuum_fraction(2.93e-7), .75)
+        # At low pressure only a few particle columns remain.
+        self.assertEqual(lit_columns(vacuum_fraction(4.06e-8)), 4)
+        self.assertGreater(vacuum_fraction(4.06e-8), 0)
+        self.assertLess(vacuum_fraction(4.06e-8), .25)
+        self.assertEqual(lit_columns(vacuum_fraction(2.93e-7)), 12)
+        self.assertGreater(vacuum_fraction(2.93e-7), .25)
+        self.assertLess(vacuum_fraction(2.93e-7), .5)
 
-    def test_fourth_tile_starts_dimming_above_the_new_pressure_floor(self):
-        self.assertLess(vacuum_fraction(2.1e-8), 1)
-        self.assertLess(vacuum_fraction(5e-8), vacuum_fraction(2.1e-8))
+    def test_particle_bar_starts_growing_above_the_pressure_floor(self):
+        self.assertGreater(vacuum_fraction(2.1e-8), 0)
+        self.assertGreater(vacuum_fraction(5e-8), vacuum_fraction(2.1e-8))
 
-    def test_fill_never_increases_as_pressure_rises(self):
+    def test_particle_fill_never_decreases_as_pressure_rises(self):
         pressures = [10 ** (-10 + i * .01) for i in range(1401)]
         levels = [vacuum_fraction(p) for p in pressures]
         self.assertTrue(all(0 <= x <= 1 for x in levels))
-        self.assertTrue(all(a >= b for a, b in zip(levels, levels[1:])))
+        self.assertTrue(all(a <= b for a, b in zip(levels, levels[1:])))
 
     def test_invalid_pressure_and_upper_bound(self):
         for p in (0, -1, math.nan, math.inf):

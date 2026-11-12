@@ -6,7 +6,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-from storage_loadlock_gauge_reader.display import Max7219Display, level_fraction
+from storage_loadlock_gauge_reader.display import Max7219Display, level_fraction, text_pixels
 
 
 class FakeSpi:
@@ -156,6 +156,56 @@ class Max7219Tests(unittest.TestCase):
                                  if x == y or x + y == 7})
         self.assertEqual(len(pixels), 64)
         self.assertNotIn((0, 3), pixels)
+
+    def test_vented_is_centered_readable_text_with_blank_outer_rows(self):
+        display = self.make_display()
+        display.show_level(1)
+        display.show_vented()
+        pixels = wire_pixels(self.spi.frames[-8:])
+        self.assertTrue(pixels)
+        self.assertTrue(all(1 <= y <= 6 for x, y in pixels))
+        self.assertEqual(min(x for x, y in pixels), 1)
+        self.assertEqual(max(x for x, y in pixels), 29)
+        # Independent top-row oracle for the six 4x6 glyphs: V E N T E D.
+        self.assertEqual({x for x, y in pixels if y == 1},
+                         {1, 4, 6, 7, 8, 9, 11, 14, 16, 17, 18, 19,
+                          21, 22, 23, 24, 26, 27, 28})
+        self.assertNotEqual(pixels, {(m * 8 + x, y) for m in range(4)
+                                    for x in range(8) for y in range(8)
+                                    if x == y or x + y == 7})
+
+    def test_eta_uses_right_tiles_and_scaled_left_bar_with_blank_outer_rows(self):
+        display = self.make_display()
+        display.show_eta(.5, "60M")
+        pixels = wire_pixels(self.spi.frames[-8:])
+        self.assertEqual({(x, y) for x, y in pixels if x < 16},
+                         {(x, y) for x in range(8) for y in range(1, 7)})
+        self.assertEqual({(x, y) for x, y in pixels if x >= 16},
+                         text_pixels("60M", width=16, x_offset=16))
+        self.assertTrue(all(1 <= y <= 6 for x, y in pixels))
+        # Returning to normal mode replaces text with a full-height 32-column bar.
+        display.show_level(1)
+        self.assertEqual(len(wire_pixels(self.spi.frames[-8:])), 256)
+
+    def test_eta_bar_honors_direction_and_empty_full_endpoints(self):
+        display = self.make_display(direction="right-to-left")
+        display.show_eta(.25, "5M")
+        self.assertEqual({(x, y) for x, y in wire_pixels(self.spi.frames[-8:]) if x < 16},
+                         {(x, y) for x in range(12, 16) for y in range(1, 7)})
+        for fraction, count in ((0, 0), (1, 96)):
+            display.show_eta(fraction, "2H")
+            self.assertEqual(len({(x, y) for x, y in wire_pixels(self.spi.frames[-8:]) if x < 16}), count)
+
+    def test_text_rendering_is_pure_case_insensitive_and_rejects_clipped_labels(self):
+        self.assertEqual(text_pixels("5m", width=16), text_pixels("5M", width=16))
+        self.assertEqual(text_pixels(""), set())
+        self.assertTrue(all(16 <= x < 32 and 1 <= y <= 6
+                            for x, y in text_pixels("99H", width=16, x_offset=16)))
+        for text, kwargs in (("100M", {"width": 16}), ("?", {}),
+                             ("5M", {"width": 0}), ("5M", {"x_offset": 20}),
+                             ("5M", {"width": 1.5}), (None, {})):
+            with self.subTest(text=text, kwargs=kwargs), self.assertRaises(ValueError):
+                text_pixels(text, **kwargs)
 
     def test_clear_and_close_are_safe_and_close_is_idempotent(self):
         display = self.make_display()

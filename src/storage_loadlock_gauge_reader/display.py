@@ -11,10 +11,10 @@ from typing import Iterable, Tuple
 
 
 def vacuum_fraction(pressure_torr: float, atmospheric_torr: float = 760.0) -> float:
-    """Continuous, piecewise-log bar for the load-lock, using Torr throughout.
+    """Continuous, piecewise-log particle bar, using Torr throughout.
 
-    1.5e-8 -> 32 columns, 1e-7 -> 24, 1e-6 -> 16, atmosphere -> 0.
-    Lower positive pressures saturate at full. Fault/status handling is separate.
+    1.5e-8 -> 0 columns, 1e-7 -> 8, 1e-6 -> 16, atmosphere -> 32.
+    Fewer lit LEDs mean lower pressure. Fault/status handling is separate.
     """
     pressure_torr, atmospheric_torr = float(pressure_torr), float(atmospheric_torr)
     if not math.isfinite(pressure_torr) or pressure_torr <= 0:
@@ -22,18 +22,71 @@ def vacuum_fraction(pressure_torr: float, atmospheric_torr: float = 760.0) -> fl
     if not math.isfinite(atmospheric_torr) or atmospheric_torr <= 1e-6:
         raise ValueError("atmospheric pressure must be finite and above 1e-6 Torr")
     if pressure_torr <= 1.5e-8:
-        return 1.0
+        return 0.0
     for low, high, start, end in (
-        (1.5e-8, 1e-7, 1.0, 0.75),
-        (1e-7, 1e-6, 0.75, 0.5),
-        (1e-6, atmospheric_torr, 0.5, 0.0),
+        (1.5e-8, 1e-7, 0.0, 0.25),
+        (1e-7, 1e-6, 0.25, 0.5),
+        (1e-6, atmospheric_torr, 0.5, 1.0),
     ):
         if pressure_torr <= high:
             progress = (math.log10(pressure_torr) - math.log10(low)) / (
                 math.log10(high) - math.log10(low)
             )
             return start + progress * (end - start)
-    return 0.0
+    return 1.0
+
+
+# Four-pixel-wide, six-row glyphs fit VENTED in 29 columns and 60M in 14.
+# Text is placed on logical rows 1..6, leaving rows 0 and 7 unused.
+FONT_4X6 = {
+    "0": ("0110", "1001", "1001", "1001", "1001", "0110"),
+    "1": ("0010", "0110", "0010", "0010", "0010", "0111"),
+    "2": ("0110", "1001", "0001", "0010", "0100", "1111"),
+    "3": ("1110", "0001", "0110", "0001", "1001", "0110"),
+    "4": ("0010", "0110", "1010", "1111", "0010", "0010"),
+    "5": ("1111", "1000", "1110", "0001", "1001", "0110"),
+    "6": ("0110", "1000", "1110", "1001", "1001", "0110"),
+    "7": ("1111", "0001", "0010", "0010", "0100", "0100"),
+    "8": ("0110", "1001", "0110", "1001", "1001", "0110"),
+    "9": ("0110", "1001", "1001", "0111", "0001", "0110"),
+    "V": ("1001", "1001", "1001", "1001", "0110", "0110"),
+    "E": ("1111", "1000", "1110", "1000", "1000", "1111"),
+    "N": ("1001", "1101", "1101", "1011", "1011", "1001"),
+    "T": ("1111", "0110", "0110", "0110", "0110", "0110"),
+    "D": ("1110", "1001", "1001", "1001", "1001", "1110"),
+    "M": ("1001", "1111", "1111", "1001", "1001", "1001"),
+    "H": ("1001", "1001", "1111", "1001", "1001", "1001"),
+    "-": ("0000", "0000", "1111", "0000", "0000", "0000"),
+    " ": ("0000", "0000", "0000", "0000", "0000", "0000"),
+}
+
+
+def text_pixels(text: str, width: int = 32, x_offset: int = 0):
+    """Return centered text pixels on rows 1..6 inside a logical display region.
+
+    Letters are case-insensitive. Unsupported or oversized text raises instead
+    of clipping a time value into a different, potentially misleading value.
+    """
+    if not isinstance(text, str):
+        raise ValueError("text must be a string")
+    if not isinstance(width, int) or not isinstance(x_offset, int):
+        raise ValueError("text region must use integer coordinates")
+    if width < 1 or x_offset < 0 or x_offset + width > 32:
+        raise ValueError("text region must fit within the 32-column display")
+    text = text.upper()
+    if any(character not in FONT_4X6 for character in text):
+        raise ValueError("text contains an unsupported character")
+    text_width = 5 * len(text) - 1 if text else 0
+    if text_width > width:
+        raise ValueError("text does not fit the display region")
+    start = x_offset + (width - text_width) // 2
+    return {
+        (start + index * 5 + column, row + 1)
+        for index, character in enumerate(text)
+        for row, bits in enumerate(FONT_4X6[character])
+        for column, bit in enumerate(bits)
+        if bit == "1"
+    }
 
 
 def lit_columns(fraction: float) -> int:
@@ -197,6 +250,32 @@ class Max7219Display:
             for x in range(8)
             if x == y or x + y == 7
         )
+
+    def show_text(self, text: str) -> None:
+        """Replace the display with centered text, keeping outer rows blank."""
+        self._show_pixels(text_pixels(text))
+
+    def show_vented(self) -> None:
+        """Show VENTED for the controller's overrange indication."""
+        self.show_text("VENTED")
+
+    def show_eta(self, fraction: float, text: str) -> None:
+        """Show a scaled bar on the left two tiles and ETA on the right two.
+
+        All pixels use rows 1..6, including the reduced-width pressure bar.
+        Normal show_level() returns to the full 32-column, eight-row bar.
+        """
+        try:
+            fraction = float(fraction)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("level must be a finite number") from exc
+        if not math.isfinite(fraction):
+            raise ValueError("level must be a finite number")
+        columns = int(max(0.0, min(1.0, fraction)) * 16 + 0.5)
+        start = 16 - columns if self.direction == "right-to-left" else 0
+        pixels = text_pixels(text, width=16, x_offset=16)
+        pixels.update((x, y) for x in range(start, start + columns) for y in range(1, 7))
+        self._show_pixels(pixels)
 
     def clear(self) -> None:
         """Blank the display without changing its brightness or orientation."""

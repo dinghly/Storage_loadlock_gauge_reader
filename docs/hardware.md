@@ -132,7 +132,7 @@ Log out and log back in, or reboot, so the group change takes effect. Check acce
 to `/dev/spidev0.0` and the selected USB serial device. Running the application
 as root is not normally necessary after the device permissions are correct.
 Installation, simulation, display checks, and normal run commands are in the
-[README](../README.md).
+[usage guide](usage.md).
 
 ## Source documents and limits of validation
 
